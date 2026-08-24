@@ -1,0 +1,106 @@
+---
+title: "ME315_Lab02_280867"
+author: "Fernanda Di Vincenzo 280867"
+format: pdf
+editor: visual
+---
+
+```{r}
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(ggcal)
+```
+
+1.  Estatísticas Suficientes:
+
+`n_atraso` = total de atrasos (ARRIVAL_DELAY \> 10)
+
+`n_total` = total de voos válidos
+
+Essas duas estatísticas são o suficiente para calcular a razão de voos atrasados por dia por cia aerea.
+
+2.  Função getStats
+
+```{r}
+getStats <- function(input, pos) {
+  input %>%
+    filter(AIRLINE %in% c("AA", "DL", "UA", "US"),
+           !is.na(ARRIVAL_DELAY), !is.na(MONTH), !is.na(DAY)) %>%
+    group_by(AIRLINE, MONTH, DAY) %>%
+    summarise(
+      n_atraso = sum(ARRIVAL_DELAY > 10),
+      n_total  = n(),
+      .groups = "drop"
+    )
+}
+```
+
+3.  Importação do arquivo `flights.csv.zip` e configuração de colunas
+
+```{r}
+mycols <- cols_only(
+  MONTH         = 'i',
+  DAY           = 'i',
+  AIRLINE       = 'c',
+  ARRIVAL_DELAY = 'd'
+)
+
+stats_por_lote <- read_csv_chunked(
+  file = "flights.csv.zip",   
+  callback = DataFrameCallback$new(getStats),
+  chunk_size = 100000,                    
+  col_types = mycols
+)
+```
+
+4.  computeStats
+
+```{r}
+computeStats <- function(x) {
+  x %>%
+    group_by(AIRLINE, MONTH, DAY) %>%
+    summarise(
+      n_atraso = sum(n_atraso),
+      n_total  = sum(n_total),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      Cia  = AIRLINE,
+      Data = as.Date(paste(2015, MONTH, DAY, sep = "-")),
+      Perc = n_atraso / n_total
+    ) %>%
+    select(Cia, Data, Perc)
+}
+
+stats <- computeStats(stats_por_lote)
+```
+
+5.  Mapa de calor como calendário
+
+```{r}
+
+pal <- scale_fill_gradient(low = "#4575b4", high = "#d73027")
+
+
+baseCalendario <- function(stats, cia) {
+  sub <- stats %>% filter(Cia == cia)
+  ggcal(sub$Data, sub$Perc)
+}
+
+cAA <- baseCalendario(stats, "AA")
+cDL <- baseCalendario(stats, "DL")
+cUA <- baseCalendario(stats, "UA")
+cUS <- baseCalendario(stats, "US")
+
+
+cAA + pal + ggtitle("Percentual de Atrasos - AA")
+cDL + pal + ggtitle("Percentual de Atrasos - DL")
+cUA + pal + ggtitle("Percentual de Atrasos - UA")
+cUS + pal + ggtitle("Percentual de Atrasos - US")
+```
+
+```{r}
+Sys.setenv(TZ = "America/Sao_Paulo")
+Sys.time()
+```
