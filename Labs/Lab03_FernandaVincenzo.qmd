@@ -1,0 +1,162 @@
+---
+title: "ME315A_LAB03"
+author: "Fernanda Di Vincenzo 280867"
+format: html
+editor: source
+---
+# Lab 03 - Dados relacionais e operações do tipo join
+## Pacotes
+
+```{r}
+library(readr)
+library(dplyr)
+library(leaflet)
+```
+
+## 1. Importação dos dados
+
+### 1.1 Aeroportos
+
+
+```{r}
+airports <- read_csv(
+  "airports.csv",
+  col_select = c(IATA_CODE, CITY, STATE, LATITUDE, LONGITUDE)
+)
+
+airports
+```
+
+### 1.2 Companhias aéreas
+
+```{r}
+
+airlines <- read_csv("airlines.csv")
+
+airlines
+```
+
+### 1.3 Voos: leitura em blocos com `readr`
+
+```{r}
+
+tamanho_chunk <- 1000000
+
+estatisticas <- list()
+
+i <- 1
+
+processar_chunk <- function(chunk, pos) {
+
+  chunk <- chunk %>%
+    select(DESTINATION_AIRPORT, ARRIVAL_DELAY)
+
+  chunk <- chunk %>%
+    filter(!grepl("^1", as.character(DESTINATION_AIRPORT)))
+
+  chunk <- chunk %>%
+    filter(
+      !is.na(DESTINATION_AIRPORT),
+      !is.na(ARRIVAL_DELAY)
+    )
+
+  resultado <- chunk %>%
+    group_by(DESTINATION_AIRPORT) %>%
+    summarise(
+      soma_atrasos = sum(ARRIVAL_DELAY),
+      numero_voos = n(),
+      .groups = "drop"
+    )
+
+  estatisticas[[i]] <<- resultado
+
+  i <<- i + 1
+}
+read_csv_chunked(
+  "flights.csv",
+  callback = SideEffectChunkCallback$new(processar_chunk),
+  chunk_size = tamanho_chunk,
+  progress = FALSE
+)
+
+flights <- bind_rows(estatisticas) %>%
+  group_by(DESTINATION_AIRPORT) %>%
+  summarise(
+    soma_atrasos = sum(soma_atrasos),
+    numero_voos = sum(numero_voos),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    atraso_medio = soma_atrasos / numero_voos
+  )
+
+flights
+```
+
+## 2. Join entre `flights` e `airports`
+
+### 2.1 Aeroportos em `flights` ausentes em `airports`
+
+```{r}
+
+anti_join(flights, airports, by = c("DESTINATION_AIRPORT" = "IATA_CODE"))
+```
+
+### 2.2 Combinando as tabelas
+
+```{r}
+
+flights <- flights |>
+  left_join(airports, by = c("DESTINATION_AIRPORT" = "IATA_CODE"))
+
+flights
+```
+
+## 3. Quantidade de aeroportos por estado
+
+```{r}
+
+airports |>
+  count(STATE, name = "n_aeroportos") |>
+  arrange(desc(n_aeroportos))
+```
+
+## 4. Mapa dos atrasos por aeroporto
+
+```{r}
+
+
+
+
+dados_mapa <- flights %>%
+  filter(
+    !is.na(LATITUDE),
+    !is.na(LONGITUDE)
+  )
+
+this <- leaflet(dados_mapa) %>%
+  addTiles() %>%
+  addMarkers(
+    lng = ~LONGITUDE,
+    lat = ~LATITUDE,
+    popup = ~paste0(
+      "<b>Aeroporto:</b> ",
+      DESTINATION_AIRPORT,
+      "<br><b>Cidade:</b> ",
+      CITY,
+      "<br><b>Estado:</b> ",
+      STATE,
+      "<br><b>Atraso médio:</b> ",
+      round(atraso_medio, 2),
+      " minutos"
+    )
+  )
+
+this
+```
+
+```{r}
+Sys.setenv(TZ = "America/Sao_Paulo")
+Sys.time()
+```
+
