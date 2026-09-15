@@ -1,0 +1,167 @@
+---
+title: "Lab05_FernandaVincenzo"
+author: "Fernanda Di Vincenzo 280867"
+format: html
+editor: source
+---
+```{r}
+library(dplyr)
+library(readr)
+library(leaflet)
+
+```
+
+```{r}
+analisa_aeronave <- function(tail_number, arquivo) {
+
+  
+  filtra_aeronave <- function(lote, posicao) {
+    lote %>% filter(TAIL_NUMBER == tail_number)
+  }
+
+  voos_aeronave_bruto <- read_csv_chunked(
+    file = arquivo,
+    callback = DataFrameCallback$new(filtra_aeronave),
+    chunk_size = 1e5,                       # 100 mil linhas por lote
+    col_types = cols(.default = col_character())
+  )
+
+  # Se a aeronave nao aparece no arquivo:
+  if (nrow(voos_aeronave_bruto) == 0) {
+    stop("Nenhum voo encontrado para a aeronave '", tail_number, "'.")
+  }
+
+  voos_aeronave <- voos_aeronave_bruto %>%
+    mutate(
+      YEAR                 = as.integer(YEAR),
+      MONTH                = as.integer(MONTH),
+      DAY                  = as.integer(DAY),
+      SCHEDULED_DEPARTURE  = as.integer(SCHEDULED_DEPARTURE), # formato HHMM
+      AIR_TIME             = as.numeric(AIR_TIME),            # minutos
+      DISTANCE             = as.numeric(DISTANCE),            # milhas
+      data_voo             = as.Date(paste(YEAR, MONTH, DAY, sep = "-"))
+    ) %>%
+    # Ordena pela data e, dentro do mesmo dia, pelo horario programado de partida
+    arrange(data_voo, SCHEDULED_DEPARTURE)
+
+  # calcular a estatistica do mapa - velocidade média do voo
+  voos_aeronave <- voos_aeronave %>%
+    mutate(
+      velocidade_media_mph = DISTANCE / (AIR_TIME / 60)
+    )
+
+  # buscar as coordenadas (latitude/longitude) dos aeroportos
+  pasta_dados       <- dirname(arquivo)
+  arquivo_aeroportos <- file.path("datasets", "airports.csv")
+
+  aeroportos <- read_csv(
+    arquivo_aeroportos,
+    col_types = cols_only(
+      IATA_CODE = 'c',
+      LATITUDE  = 'd',
+      LONGITUDE = 'd'
+    )
+  )
+
+  # Junta a latitude/longitude do aeroporto de origem
+  voos_aeronave <- voos_aeronave %>%
+    left_join(aeroportos, by = c("ORIGIN_AIRPORT" = "IATA_CODE")) %>%
+    rename(origem_lat = LATITUDE, origem_lon = LONGITUDE)
+
+  # Junta a latitude/longitude do aeroporto de destino
+  voos_aeronave <- voos_aeronave %>%
+    left_join(aeroportos, by = c("DESTINATION_AIRPORT" = "IATA_CODE")) %>%
+    rename(destino_lat = LATITUDE, destino_lon = LONGITUDE)
+
+  # Para caso não conter o aeroporto no arquivo:
+  voos_no_mapa <- voos_aeronave %>%
+    filter(!is.na(origem_lat), !is.na(destino_lat))
+
+  if (nrow(voos_no_mapa) < nrow(voos_aeronave)) {
+    message(
+      nrow(voos_aeronave) - nrow(voos_no_mapa),
+      " trecho(s) nao puderam ser desenhados por falta de coordenadas ",
+      "de aeroporto."
+    )
+  }
+
+  velocidade_min <- min(voos_no_mapa$velocidade_media_mph, na.rm = TRUE)
+  velocidade_max <- max(voos_no_mapa$velocidade_media_mph, na.rm = TRUE)
+
+  voos_no_mapa <- voos_no_mapa %>%
+    mutate(
+      espessura_linha = 2 + 8 * (velocidade_media_mph - velocidade_min) /
+        (velocidade_max - velocidade_min)
+    )
+
+  # popup de cada trecho
+  voos_no_mapa <- voos_no_mapa %>%
+    mutate(
+      texto_popup = paste0(
+        "<b>", ORIGIN_AIRPORT, " -> ", DESTINATION_AIRPORT, "</b><br/>",
+        "Data: ", format(data_voo, "%d/%m/%Y"), "<br/>",
+        "Velocidade media: ", round(velocidade_media_mph, 0), " mph"
+      )
+    )
+
+  # desenhar o mapa com leaflet
+  mapa_trajeto <- leaflet(voos_no_mapa) %>%
+    addProviderTiles("CartoDB.Positron")
+
+  for (linha in seq_len(nrow(voos_no_mapa))) {
+    mapa_trajeto <- mapa_trajeto %>%
+      addPolylines(
+        lng     = c(voos_no_mapa$origem_lon[linha], voos_no_mapa$destino_lon[linha]),
+        lat     = c(voos_no_mapa$origem_lat[linha], voos_no_mapa$destino_lat[linha]),
+        weight  = voos_no_mapa$espessura_linha[linha],
+        color   = "#2c7fb8",
+        opacity = 0.75,
+        popup   = voos_no_mapa$texto_popup[linha]
+      )
+  }
+
+  # Marca todos os aeroportos visitados (origem + destino), sem repetir
+  aeroportos_visitados <- bind_rows(
+    voos_no_mapa %>% select(codigo = ORIGIN_AIRPORT, lat = origem_lat, lon = origem_lon),
+    voos_no_mapa %>% select(codigo = DESTINATION_AIRPORT, lat = destino_lat, lon = destino_lon)
+  ) %>%
+    distinct(codigo, .keep_all = TRUE)
+
+  mapa_trajeto <- mapa_trajeto %>%
+    addCircleMarkers(
+      data   = aeroportos_visitados,
+      lng    = ~lon,
+      lat    = ~lat,
+      label  = ~codigo,
+      radius = 5,
+      color  = "#d73027",
+      fillOpacity = 0.9
+    )
+
+  list(
+    tabela  = voos_aeronave,
+    grafico = mapa_trajeto
+  )
+}
+
+```
+
+
+```{r}
+ resultado <- analisa_aeronave(
+   tail_number = "N431WN",
+   arquivo     = file.path("datasets", "flights.csv.zip")
+ )
+ resultado$tabela   # tibble com todos os voos da aeronave, em ordem
+ resultado$grafico  # mapa leaflet com o trajeto
+```
+# Data e hora que o arquivo foi compilado:
+```{r}
+Sys.setenv(TZ = "America/Sao_Paulo")
+Sys.time()
+```
+
+
+
+
+ 
