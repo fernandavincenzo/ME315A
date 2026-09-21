@@ -1,0 +1,129 @@
+---
+title: "Lab06_FernandaVincenzo"
+author: "Fernanda Di Vincenzo 280867"
+format: pdf
+editor: visual
+---
+
+## Pacotes
+
+```{r}
+#| label: pacotes
+library(RSQLite)
+library(dplyr)
+library(stringr)
+```
+
+## 1. Caminho do arquivo `disco.db`
+
+```{r}
+fname <- file.path("datasets", "disco.db")
+fname
+file.exists(fname)
+```
+
+## 2. Conexão com o banco de dados
+
+```{r}
+conn <- dbConnect(SQLite(), fname)
+conn
+```
+
+## 3. Tabelas existentes no banco
+
+```{r}
+dbListTables(conn)
+```
+
+## 4. Colunas da tabela `customers`
+
+```{r}
+dbListFields(conn, "customers")
+```
+
+## 5. Número de clientes cadastrados
+
+```{r}
+dbGetQuery(conn, "SELECT COUNT(*) AS n_clientes FROM customers")
+```
+
+## 6. Número de países diferentes
+
+```{r}
+dbGetQuery(conn, "SELECT COUNT(DISTINCT country) AS n_paises FROM customers")
+```
+
+## 7. Clientes por país (ordem decrescente)
+
+```{r}
+sql <- paste("SELECT country, COUNT(*) AS n_clientes",
+             "FROM customers",
+             "GROUP BY country",
+             "ORDER BY n_clientes DESC")
+clientes_pais <- dbGetQuery(conn, sql)
+clientes_pais
+```
+
+## 8. Os 5 países com mais clientes
+
+```{r}
+sql <- paste("SELECT country, COUNT(*) AS n_clientes",
+             "FROM customers",
+             "GROUP BY country",
+             "ORDER BY n_clientes DESC",
+             "LIMIT 5")
+dbGetQuery(conn, sql)
+```
+
+:::
+
+## 9. Países cujo nome possui exatamente 6 letras
+
+
+```{r}
+sql <- "SELECT DISTINCT country FROM customers WHERE country GLOB '??????'"
+dbGetQuery(conn, sql)
+```
+
+Conferência com `dplyr` e `stringr`:
+
+```{r}
+clientes_pais |>
+  filter(str_length(Country) == 6) |>
+  select(Country)
+```
+
+## 10. Músicas compradas por clientes brasileiros
+
+
+```{r}
+sql <- paste(
+  "SELECT DISTINCT tracks.trackid, tracks.name",
+  "FROM customers",
+  "INNER JOIN invoices      ON invoices.customerid = customers.customerid",
+  "INNER JOIN invoice_items ON invoice_items.invoiceid = invoices.invoiceid",
+  "INNER JOIN tracks        ON tracks.trackid = invoice_items.trackid",
+  "WHERE customers.country = 'Brazil'"
+)
+musicas_br <- dbGetQuery(conn, sql) |>
+  as_tibble() |>
+  arrange(Name)
+
+musicas_br
+nrow(musicas_br)
+```
+
+## 11. Desconectar do banco de dados
+
+```{r}
+dbDisconnect(conn)
+```
+
+
+## Horário de Compilamento
+
+```{r}
+Sys.setenv(TZ = "America/Sao_Paulo")
+Sys.time()
+```
+
