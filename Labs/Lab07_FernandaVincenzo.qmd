@@ -1,0 +1,156 @@
+---
+title: "Lab06_FernandaVincenzo"
+author: "Fernanda Di Vincenzo 280867"
+format: pdf
+editor: visual
+---
+
+
+```{r}
+library(RSQLite)
+```
+
+## 1. Conexão
+
+```{r}
+conn <- dbConnect(SQLite(), "datasets/uwmadison.sqlite3")
+conn
+
+dbListTables(conn)
+```
+## 2. Professores que lecionaram disciplinas de Estatística (`STAT`)
+
+```{r}
+sql_professores <- "
+SELECT DISTINCT i.id, i.name
+FROM instructors i
+INNER JOIN teachings t             ON t.instructor_id = i.id
+INNER JOIN sections s              ON s.uuid = t.section_uuid
+INNER JOIN course_offerings co     ON co.uuid = s.course_offering_uuid
+INNER JOIN subject_memberships sm  ON sm.course_offering_uuid = co.uuid
+INNER JOIN subjects su             ON su.code = sm.subject_code
+WHERE su.abbreviation = 'STAT'
+ORDER BY i.name
+"
+
+sql_quant_profs <- "
+SELECT COUNT(DISTINCT i.id) AS n_professores
+FROM instructors i
+INNER JOIN teachings t             ON t.instructor_id = i.id
+INNER JOIN sections s              ON s.uuid = t.section_uuid
+INNER JOIN course_offerings co     ON co.uuid = s.course_offering_uuid
+INNER JOIN subject_memberships sm  ON sm.course_offering_uuid = co.uuid
+INNER JOIN subjects su             ON su.code = sm.subject_code
+WHERE su.abbreviation = 'STAT'
+"
+```
+
+Nomes e Ids dos professores:
+```{r}
+profs <- dbGetQuery(conn, sql_professores)
+head(profs, 20)
+```
+Quantos são:
+```{r}
+quant_profs <- dbGetQuery(conn, sql_quant_profs)
+head(quant_profs)
+```
+
+## 3. Dificuldade
+
+```{r}
+pontos <- "(gd.a_count*4.0 + gd.ab_count*3.5 + gd.b_count*3.0 +
+            gd.bc_count*2.5 + gd.c_count*2.0 + gd.d_count*1.0 + gd.f_count*0.0)"
+alunos <- "(gd.a_count + gd.ab_count + gd.b_count + gd.bc_count +
+            gd.c_count + gd.d_count + gd.f_count)"
+
+# Base comum: notas de turmas de STAT, ligadas a professor e disciplina
+from_base <- "
+FROM grade_distributions gd
+INNER JOIN sections s              ON s.course_offering_uuid = gd.course_offering_uuid
+                                  AND s.number = gd.section_number
+INNER JOIN teachings t             ON t.section_uuid = s.uuid
+INNER JOIN instructors i           ON i.id = t.instructor_id
+INNER JOIN course_offerings co     ON co.uuid = gd.course_offering_uuid
+INNER JOIN courses c               ON c.uuid = co.course_uuid
+INNER JOIN subject_memberships sm  ON sm.course_offering_uuid = co.uuid
+INNER JOIN subjects su             ON su.code = sm.subject_code
+WHERE su.abbreviation = 'STAT'
+"
+```
+
+### Professores
+
+```{r}
+
+sql_gpa_prof <- paste0("
+SELECT i.id, i.name AS professor,
+       SUM(", pontos, ") / SUM(", alunos, ") AS gpa,
+       SUM(", alunos, ") AS n_alunos
+", from_base, "
+GROUP BY i.id, i.name
+HAVING SUM(", alunos, ") >= ", 1, "
+ORDER BY gpa
+")
+gpa_prof <- dbGetQuery(conn, sql_gpa_prof)
+```
+
+**Professores mais difíceis** (menor GPA):
+
+```{r}
+head(gpa_prof, 5)
+```
+
+**Professores mais fáceis** (maior GPA):
+
+```{r}
+tail(gpa_prof, 5)[5:1, ]
+```
+
+
+### Disciplinas
+
+
+```{r}
+sql_gpa_disc <- paste0("
+SELECT c.number AS numero, c.name AS disciplina,
+       SUM(", pontos, ") / SUM(", alunos, ") AS gpa,
+       SUM(", alunos, ") AS n_alunos
+FROM grade_distributions gd
+INNER JOIN course_offerings co     ON co.uuid = gd.course_offering_uuid
+INNER JOIN courses c               ON c.uuid = co.course_uuid
+INNER JOIN subject_memberships sm  ON sm.course_offering_uuid = co.uuid
+INNER JOIN subjects su             ON su.code = sm.subject_code
+WHERE su.abbreviation = 'STAT'
+GROUP BY c.uuid, c.number, c.name
+HAVING SUM(", alunos, ") >= ", 1, "
+ORDER BY gpa
+")
+gpa_disc <- dbGetQuery(conn, sql_gpa_disc)
+```
+
+**Disciplinas mais difíceis:**
+
+```{r}
+head(gpa_disc, 5)
+```
+
+**Disciplinas mais fáceis:**
+
+```{r}
+tail(gpa_disc, 5)[5:1, ]
+```
+
+## 4. Desconexão
+
+```{r}
+dbDisconnect(conn)
+```
+
+
+## Horário de Compilamento
+
+```{r}
+Sys.setenv(TZ = "America/Sao_Paulo")
+Sys.time()
+```
