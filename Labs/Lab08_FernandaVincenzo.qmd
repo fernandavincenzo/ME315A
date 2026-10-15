@@ -1,0 +1,120 @@
+---
+title: "Laboratório 2: Dados Relacionais com Polars"
+author: "Benilton S Carvalho"
+lang: pt-BR
+format:
+  pdf:
+    toc: true
+    number-sections: true
+    geometry: margin=2.5cm
+execute:
+  warning: false
+  message: false
+jupyter: python3
+---
+
+## Importação dos Banco de Dados
+```{python}
+import polars as pl
+
+null_values = ["\\N"]
+
+basics = pl.read_csv(
+    "title.basics0.tsv.gz",
+    separator="\t",
+    null_values=null_values,
+    infer_schema_length=10000,
+)
+
+ratings = pl.read_csv(
+    "title.ratings.tsv.gz",
+    separator="\t",
+    null_values=null_values,
+)
+
+principals = pl.read_csv(
+    "title.principals0.tsv.gz",
+    separator="\t",
+    null_values=null_values,
+)
+```
+
+## Inspeção das três tabelas:
+
+```{python}
+basics.head()
+```
+
+```{python}
+ratings.head()
+```
+
+```{python}
+principals.head()
+```
+
+### Os 5 filmes com as maiores notas (desempate por número de votos)
+
+Restringimos a análise a títulos do tipo `movie`, juntamos `basics` com `ratings` por `tconst`, e ordenamos por `averageRating` e, em caso de empate, por `numVotes`, ambos em ordem decrescente.
+
+```{python}
+top5 = (
+    basics
+    .filter(pl.col("titleType") == "movie")
+    .join(ratings, on="tconst", how="inner")
+    .sort(["averageRating", "numVotes"], descending=[True, True])
+    .select(["tconst", "primaryTitle", "startYear", "averageRating", "numVotes"])
+    .head(5)
+)
+top5
+```
+
+### Gênero mais frequente entre os filmes com nota maior que 8
+
+A coluna `genres` contém múltiplos gêneros separados por vírgula; é preciso separá-los (`str.split`), expandir cada filme em uma linha por gênero (`explode`) e então contar as ocorrências.
+
+```{python}
+genre_counts = (
+    basics
+    .filter(pl.col("titleType") == "movie")
+    .join(ratings, on="tconst", how="inner")
+    .filter(pl.col("averageRating") > 8)
+    .filter(pl.col("genres").is_not_null())
+    .with_columns(pl.col("genres").str.split(","))
+    .explode("genres")
+    .group_by("genres")
+    .agg(pl.len().alias("n_filmes"))
+    .sort("n_filmes", descending=True)
+)
+
+genre_counts.head(10)
+```
+
+```{python}
+genero_mais_frequente = genre_counts.row(0)
+print(
+    f"Gênero mais frequente entre filmes com nota > 8: "
+    f"{genero_mais_frequente[0]} ({genero_mais_frequente[1]} filmes)"
+)
+```
+
+### Os 3 atores/atrizes que mais participaram de filmes com nota maior que 7.5
+
+Filtramos `principals` para as categorias `actor` e `actress`, restringimos aos filmes com `averageRating > 7.5` e contamos as participações por `nconst` (identificador da pessoa).
+
+```{python}
+top_atores = (
+    basics
+    .filter(pl.col("titleType") == "movie")
+    .join(ratings, on="tconst", how="inner")
+    .filter(pl.col("averageRating") > 7.5)
+    .join(principals, on="tconst", how="inner")
+    .filter(pl.col("category").is_in(["actor", "actress"]))
+    .group_by("nconst")
+    .agg(pl.len().alias("n_filmes"))
+    .sort("n_filmes", descending=True)
+    .head(3)
+)
+top_atores
+```
+
